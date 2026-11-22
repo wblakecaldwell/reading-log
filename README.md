@@ -27,7 +27,7 @@ Each run is incremental: photos can overlap or skip pages, and nothing already o
 
 ```bash
 brew install uv pango poppler   # uv for Python, pango for WeasyPrint, poppler for PDF previews
-git clone https://github.com/<you>/reading-log.git
+git clone https://github.com/wblakecaldwell/reading-log.git
 cd reading-log
 uv sync                         # creates .venv with pinned dependencies
 uv run pytest                   # optional: run the unit tests
@@ -39,8 +39,8 @@ Then open Claude Code in the folder, attach your log photos, and say something l
 
 The reading log sits next to your reading chair, not your desk. With Claude Code's [Remote Control](https://code.claude.com/docs/en/remote-control) mode you can run everything from your phone while the scripts, your data and your printer stay on your Mac.
 
-1. **On your Mac (once per sitting):** start Claude Code in this folder with Remote Control turned on, by running `claude remote-control` in a terminal or typing `/remote-control` in a running session. Leave the Mac awake.
-2. **On your phone:** open the Claude app (or claude.ai/code), pick that session, and take photos of the log pages you've filled in since last time. Shoot them flat, in good light, with the whole page in frame. Overlapping pages you've already sent are fine.
+1. **On your Mac (once per sitting):** in this folder, run `claude remote-control` (or `claude --remote-control` for an interactive session, or type `/remote-control` in one that's already running). Leave the Mac awake and the `claude` process running. Remote Control needs a claude.ai sign-in on a Pro, Max, Team or Enterprise plan; API keys don't work.
+2. **On your phone:** scan the QR code the terminal shows (press space if it isn't visible), or open the Claude app, tap **Code**, and pick the session. Then take photos of the log pages you've filled in since last time. Shoot them flat, in good light, with the whole page in frame. Overlapping pages you've already sent are fine.
 3. **Send them** with a short message such as "process these." Claude reads the handwriting, looks up the books, and asks you about anything it can't read or isn't sure of. Answer from your phone.
 4. **Check the cutout sheet.** If any covers still need printing, Claude sends the new `covers-YYYY-MM-DD.pdf` to your phone so you can look it over.
 5. **Reply "print it"** and your Mac sends the sheet to your printer at 100% scale. Cut the covers out, glue them into the log, and the next photos you send will mark them as pasted.
