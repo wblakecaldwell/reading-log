@@ -1,0 +1,11 @@
+# Personal reading-log data (never commit)
+_private/
+
+# Python / tooling
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# macOS
+.DS_Store
