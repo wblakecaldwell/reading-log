@@ -35,6 +35,16 @@ uv run pytest                   # optional: run the unit tests
 
 Then open Claude Code in the folder, attach your log photos, and say something like "process these."
 
+## Suggested workflow: snap pages from your phone
+
+The reading log sits next to your reading chair, not your desk. With Claude Code's [Remote Control](https://code.claude.com/docs/en/remote-control) mode you can run everything from your phone while the scripts, your data and your printer stay on your Mac.
+
+1. **On your Mac (once per sitting):** start Claude Code in this folder with Remote Control turned on, by running `claude remote-control` in a terminal or typing `/remote-control` in a running session. Leave the Mac awake.
+2. **On your phone:** open the Claude app (or claude.ai/code), pick that session, and take photos of the log pages you've filled in since last time. Shoot them flat, in good light, with the whole page in frame. Overlapping pages you've already sent are fine.
+3. **Send them** with a short message such as "process these." Claude reads the handwriting, looks up the books, and asks you about anything it can't read or isn't sure of. Answer from your phone.
+4. **Check the cutout sheet.** If any covers still need printing, Claude sends the new `covers-YYYY-MM-DD.pdf` to your phone so you can look it over.
+5. **Reply "print it"** and your Mac sends the sheet to your printer at 100% scale. Cut the covers out, glue them into the log, and the next photos you send will mark them as pasted.
+
 ## Adapting it to your journal
 
 Open `CLAUDE.md` and edit the **Book Log Profile** table near the top:
