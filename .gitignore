@@ -1,5 +1,6 @@
 # Personal reading-log data (never commit)
 _private/
+CLAUDE.local.md
 
 # Python / tooling
 .venv/
