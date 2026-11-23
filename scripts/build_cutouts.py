@@ -2,7 +2,7 @@
 """Compile _private/to-print/covers-YYYY-MM-DD.pdf for every book with cover_status: needed.
 
 Exact 1:1 physical layout on US Letter with ReportLab. Each cover is fitted
-inside a 3.3 x 4.31 cm box (aspect preserved). Width-constrained covers stand
+inside the 3.3 x 4.31 cm box less 0.1 cm clearance per side (aspect preserved). Width-constrained covers stand
 upright in 3.3 cm columns; height-constrained covers are rotated 90 degrees and
 stacked in 4.31 cm columns, so every column's left/right edges line up for
 straight paper-cutter cuts. >= 1.0 cm between covers, >= 1.25 cm outer margin,
@@ -19,6 +19,9 @@ Usage:
         # was replaced or a book corrected): flips that sheet's books back to
         # needed, removes the sheet and its manifest, then builds a fresh sheet
         # under the same name. Never use it on a sheet that has been printed.
+    build_cutouts.py --reprint ID [ID ...]
+        # A new sheet with just these books, whatever their status (e.g. covers
+        # that printed wrong); statuses are left unchanged.
 """
 from __future__ import annotations
 
@@ -36,7 +39,13 @@ CM = 28.3465                # points per cm
 PAGE_W, PAGE_H = 21.59, 27.94
 MARGIN = 1.25               # outer margin, all sides
 BOTTOM_RESERVE = 1.25       # extra band above the bottom margin for the calibration bar
-BOX_W, BOX_H = 3.3, 4.31
+BOX_W, BOX_H = 3.3, 4.31     # the log's cover box, as printed on its pages
+# The box's usable inside is smaller than its nominal size (its border lines
+# take room, and cutting is never perfect), so covers are fitted into the box
+# minus this clearance on every side. Without it, any cover that hit the box's
+# full width (square audiobook art) printed too big to fit.
+CLEARANCE = 0.1              # cm per side
+FIT_W, FIT_H = BOX_W - 2 * CLEARANCE, BOX_H - 2 * CLEARANCE
 GAP = 1.0
 EPS = 1e-9
 
@@ -54,10 +63,10 @@ class Placed:
 
 
 def fit(img_w: float, img_h: float) -> tuple[float, float, bool]:
-    """Fit into BOX_W x BOX_H. Returns (w, h, width_constrained)."""
-    scale = min(BOX_W / img_w, BOX_H / img_h)
+    """Fit into FIT_W x FIT_H (the box less clearance). Returns (w, h, width_constrained)."""
+    scale = min(FIT_W / img_w, FIT_H / img_h)
     w, h = img_w * scale, img_h * scale
-    width_constrained = abs(w - BOX_W) < 1e-6 and h <= BOX_H + 1e-6
+    width_constrained = abs(w - FIT_W) < 1e-6 and h <= FIT_H + 1e-6
     return w, h, width_constrained
 
 
@@ -67,15 +76,15 @@ def layout(items: list[tuple[str, str, float, float]]) -> list[Placed]:
     for bid, img, pw, ph in items:
         w, h, wc = fit(pw, ph)
         if wc:
-            upright.append((bid, img, BOX_W, h, False))
-        else:  # height == 4.31: rotate so the 4.31 edge runs horizontally
-            rotated.append((bid, img, BOX_H, w, True))
+            upright.append((bid, img, FIT_W, h, False))
+        else:  # height == FIT_H: rotate so that edge runs horizontally
+            rotated.append((bid, img, FIT_H, w, True))
     top = PAGE_H - MARGIN
     bottom = MARGIN + BOTTOM_RESERVE
     right = PAGE_W - MARGIN
     placed: list[Placed] = []
     page, x = 0, MARGIN
-    for group, col_w in ((upright, BOX_W), (rotated, BOX_H)):
+    for group, col_w in ((upright, FIT_W), (rotated, FIT_H)):
         queue = list(group)
         while queue:
             if x + col_w > right + EPS:      # no room for another column
@@ -161,14 +170,19 @@ def main() -> int:
     ap.add_argument("--date", default=dt.date.today().isoformat())
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--redo", type=Path, help="unprinted sheet to rebuild")
+    ap.add_argument("--reprint", nargs="+", metavar="ID", help="books to print again")
     a = ap.parse_args()
     books = load_books(BOOKS_YAML)
     redo_path = None
     if a.redo:
         books, redo_path = undo_sheet(books, a.redo)
+    wanted = (lambda b: b["id"] in set(a.reprint)) if a.reprint else \
+        (lambda b: b.get("cover_status") == "needed")
     needed = [b for b in sorted(books, key=sort_key)
-              if b.get("cover_status") == "needed" and b.get("cover_image")
-              and (DATA / b["cover_image"]).is_file()]
+              if wanted(b) and b.get("cover_image") and (DATA / b["cover_image"]).is_file()]
+    if a.reprint and len(needed) != len(set(a.reprint)):
+        missing = set(a.reprint) - {b["id"] for b in needed}
+        raise SystemExit(f"unknown id or no cover: {', '.join(sorted(missing))}")
     if not needed:
         print("No covers needed; no cutout PDF generated.")
         return 0
@@ -187,6 +201,9 @@ def main() -> int:
     draw(placed, out)
     out.with_suffix(".json").write_text(json.dumps(sorted(p.book_id for p in placed), indent=1))
     print(f"{out.relative_to(DATA.parent)}: {len(placed)} covers on {pages} page(s)")
+    if a.reprint:
+        print("reprint: statuses unchanged")
+        return 0
     done = {p.book_id for p in placed}
     for b in books:
         if b["id"] in done and b.get("cover_status") == "needed":

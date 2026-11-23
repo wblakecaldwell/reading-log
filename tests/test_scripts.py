@@ -116,10 +116,10 @@ def test_meta_line_omits_missing():
 # --------------------------------------------------------------- cutouts ---
 def test_fit_preserves_aspect_and_hits_one_edge():
     w, h, wc = bc.fit(1000, 1500)       # 2:3 cover is height-constrained (4.31 tall)
-    assert abs(h - bc.BOX_H) < 1e-9 and w < bc.BOX_W and not wc
+    assert abs(h - bc.FIT_H) < 1e-9 and w < bc.FIT_W and not wc
     assert abs(w / h - 1000 / 1500) < 1e-9
     w, h, wc = bc.fit(1000, 1000)       # square is width-constrained
-    assert abs(w - bc.BOX_W) < 1e-9 and h <= bc.BOX_H and wc
+    assert abs(w - bc.FIT_W) < 1e-9 and h <= bc.FIT_H and wc
 
 
 def _overlap_gap(a, b):
@@ -136,9 +136,9 @@ def test_layout_spacing_margins_and_columns():
         assert p.x >= bc.MARGIN - 1e-9 and p.x + p.w <= bc.PAGE_W - bc.MARGIN + 1e-9
         assert p.y >= bc.MARGIN + bc.BOTTOM_RESERVE - 1e-9
         assert p.y + p.h <= bc.PAGE_H - bc.MARGIN + 1e-9
-        assert p.w <= max(bc.BOX_W, bc.BOX_H) + 1e-9
-        assert (abs(p.w - bc.BOX_W) < 1e-9 and not p.rotated) or \
-               (abs(p.w - bc.BOX_H) < 1e-9 and p.rotated)
+        assert p.w <= max(bc.FIT_W, bc.FIT_H) + 1e-9
+        assert (abs(p.w - bc.FIT_W) < 1e-9 and not p.rotated) or \
+               (abs(p.w - bc.FIT_H) < 1e-9 and p.rotated)
     for i, a in enumerate(placed):
         for b in placed[i + 1:]:
             if a.page == b.page:
@@ -288,3 +288,17 @@ def test_find_pages_parsers():
     it = 'x\\"primaryLocale\\":\\"it\\" "numberOfPages":312'
     assert find_pages.page_count(en) == 312
     assert find_pages.page_count(it) is None                   # foreign-language edition
+
+
+def test_every_cover_fits_inside_the_box_with_clearance():
+    # Square audiobook art used to be sized to the box's full 3.3 cm width,
+    # leaving nothing for the box's border lines; it printed too big.
+    for px in [(1000, 1000), (3000, 2000), (1000, 1500), (1200, 1900), (500, 2000)]:
+        w, h, _ = bc.fit(*px)
+        assert w <= bc.BOX_W - 2 * bc.CLEARANCE + 1e-9
+        assert h <= bc.BOX_H - 2 * bc.CLEARANCE + 1e-9
+        assert abs(w / h - px[0] / px[1]) < 1e-9          # never distorted
+    placed = bc.layout([("sq", "sq.png", 1000, 1000), ("tall", "t.png", 1000, 1500)])
+    for p in placed:   # on the page, whichever way it is turned
+        assert min(p.w, p.h) <= bc.BOX_W - 2 * bc.CLEARANCE + 1e-9
+        assert max(p.w, p.h) <= bc.BOX_H - 2 * bc.CLEARANCE + 1e-9

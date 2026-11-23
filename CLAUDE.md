@@ -108,6 +108,7 @@ Do not perform photo archival, filename sanitization, sorting, YAML edits, or PD
   - A better cover for a stored book: `add_book.py --replace-cover ID FILE` (same size and mockup rules as a new cover).
   - A record the user confirms was misidentified: `add_book.py --remove ID`, then add the right book normally. This is the only time a record may be deleted.
   - If a corrected book was already on a cutout sheet that has **not been printed yet**, rebuild that sheet with `build_cutouts.py --redo to-print/covers-YYYY-MM-DD.pdf`. Once the user may have printed a sheet, leave it alone and let the next run's sheet carry any fix.
+  - Covers that printed wrong on a sheet already printed: `build_cutouts.py --reprint ID [ID ...]` makes a new sheet with just those books and leaves their status alone.
   - `build_cutouts.py --dry-run` only reports the layout and writes nothing.
 - **Git:** commit only code and docs. Never commit anything in `_private/`, never amend a commit, and never force-push. Commit or push only when the user asks.
 
@@ -203,10 +204,10 @@ Rebuild `book-log.pdf` from **ALL** entries in `books.yaml` whenever a run adds 
 Generate a cutout PDF **only** if one or more books currently have `cover_status: needed`. Never overwrite an existing same-day file—append `-2`, `-3`, etc. if multiple runs occur on the same date.
 
 - **Exact physical sizing (1:1 scale):** Use the profile's paper size with exact physical coordinates (`1 cm = 28.3465 pt`) and at least the profile's printer-safe margin on all four sides.
-- **Per-cover dimensions:** Fit every cover strictly within the profile's cover box (`W × H`) without distorting aspect ratio: height must equal `H` and/or width must equal `W`.
+- **Per-cover dimensions:** Fit every cover strictly within the profile's cover box less a `0.1 cm` clearance on every side (`W' × H'` = `(W − 0.2) × (H − 0.2)`, `CLEARANCE` in `build_cutouts.py`), without distorting aspect ratio: height must equal `H'` and/or width must equal `W'`. The clearance leaves room for the box's border lines; without it, covers that reach the full box width (square audiobook art) print too big.
 - **Cut-minimizing column packing:**
-  - Group **width-constrained** covers (`width == W`, `height <= H`) upright in shared `W`-wide columns so both left and right edges align vertically for straight paper-cutter cuts.
-  - Rotate **height-constrained** covers (`height == H`, `width < W`) by `90 degrees` so their `H` edge runs horizontally, and group them in shared `H`-wide columns so their left and right edges also align vertically.
+  - Group **width-constrained** covers (`width == W'`, `height <= H'`) upright in shared `W'`-wide columns so both left and right edges align vertically for straight paper-cutter cuts.
+  - Rotate **height-constrained** covers (`height == H'`, `width < W'`) by `90 degrees` so their `H'` edge runs horizontally, and group them in shared `H'`-wide columns so their left and right edges also align vertically.
   - Maintain at least `1.0 cm` spacing between adjacent covers (both horizontally and vertically).
 - **Cut aids & calibration:**
   - Draw a faint `0.5pt solid #cccccc` border tightly around each cover so white/light-colored covers have visible cut edges.
@@ -220,7 +221,7 @@ A run is complete only when all of the following hold:
 - Every processed input photo from the current batch has been archived into `log-photos/` with a `YYYY-MM-DD_NN.<ext>` filename (or skipped cleanly if an identical hash already exists).
 - Every confirmed book from the attached photos (plus all previously stored books) has its high-resolution cover image in `cover-art/` and a valid entry in the sorted `books.yaml` containing `id`, `title`, `author`, `year_released`, `isbn`, `pages` (or `audio_length` for an audio-only book), `cover_image`, `cover_status`, and `description`. No book is left without a length.
 - `book-log.pdf` is rebuilt from all entries in `books.yaml`, sorted alphabetically by title, with zero split cards or broken images.
-- If any books had `cover_status: needed`, a dated cutout PDF exists in `to-print/` with exact cover-box (`W × H`) scaling, at least `1.0 cm` spacing, aligned columns, and a `5.0 cm` calibration bar, and those entries have been updated to `cover_status: printed`.
+- If any books had `cover_status: needed`, a dated cutout PDF exists in `to-print/` with every cover fitted inside the cover box less its clearance, at least `1.0 cm` spacing, aligned columns, and a `5.0 cm` calibration bar, and those entries have been updated to `cover_status: printed`.
 - `book-log.pdf` and this run's cutout PDFs have been handed to the user as described in Phase 3 (or their previews, when over the phone limit).
 - On the first run (or after script edits), unit tests pass and rendered PNG previews of both PDFs have been visually verified.
 - Your final message includes:
