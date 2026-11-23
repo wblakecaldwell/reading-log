@@ -11,6 +11,12 @@ Each run processes a partial batch of new or overlapping log photos and maintain
 
 ---
 
+# Privacy (read first)
+
+This file and everything else outside `_private/` is committed and public. Never put anything from the reader's actual log, or anything derived from `_private/` data, here or in code, tests, commit messages or docs: no book titles or authors from their list, no names, no handwriting samples, no dates, no paths or device names, and no numbers, IDs or URLs looked up for their books (ISBNs, ASINs, page counts, listening lengths, cover-image IDs, store links). Tests and examples use made-up values only (e.g. *Emma*, *Dracula*, ISBN `9780000000002`). Reader-specific notes go in `CLAUDE.local.md`; data goes in `_private/`. The `.githooks/` guard blocks commits that break this; never bypass it with `--no-verify`.
+
+---
+
 # Book Log Profile
 
 The only section to edit when using this system with a different physical log. The rest of this file refers to these values instead of hard-coding them.
@@ -22,7 +28,6 @@ The only section to edit when using this system with a different physical log. T
 | Cover box (`W × H`) | `3.3 × 4.31 cm` (`1.3 × 1.7 in`) |
 | Paper | US Letter (`21.59 × 27.94 cm`, `lp` media `Letter`) |
 | Printer-safe margin | `1.25 cm` on every side |
-| Printer queue | `<PRINTER_QUEUE_NAME>` (any color printer; list queues with `lpstat -p`) |
 
 The cover box is also set as `BOX_W` / `BOX_H` in `scripts/build_cutouts.py`, and the paper and margin as `PAGE_W` / `PAGE_H` / `MARGIN`. Keep them in sync with this table.
 
@@ -46,9 +51,12 @@ All personal data lives under `_private/`, which is gitignored, so the repositor
 ├── scripts/
 │   ├── archive_photos.py          # Date-stamps & deduplicates into _private/log-photos/
 │   ├── find_books.py              # Fuzzy lookup against _private/books.yaml
+│   ├── find_cover.py              # Searches many sources for flat, high-res cover candidates
+│   ├── cover_sheet.py             # Contact sheet of covers for a visual check
 │   ├── add_book.py                # Sole writer to _private/books.yaml & _private/cover-art/
 │   ├── build_catalog.py           # Compiles _private/book-log.pdf from books.yaml
-│   └── build_cutouts.py           # Compiles _private/to-print/covers-YYYY-MM-DD.pdf
+│   ├── build_cutouts.py           # Compiles _private/to-print/covers-YYYY-MM-DD.pdf
+│   └── make_preview.py            # Small view-only copies of large PDFs for phones
 ├── tests/
 │   └── test_scripts.py            # Unit tests (no personal data)
 └── _private/                      # Personal data, never committed (created on first run)
@@ -56,7 +64,8 @@ All personal data lives under `_private/`, which is gitignored, so the repositor
     ├── book-log.pdf               # Complete digital catalog (all books)
     ├── cover-art/                 # High-res cover images
     ├── log-photos/                # Date-stamped archive of processed photos
-    └── to-print/                  # Dated printable cutout PDFs
+    ├── to-print/                  # Dated printable cutout PDFs
+    └── previews/                  # View-only, phone-sized copies of large PDFs
 ```
 
 **Pre-flight check:** The scripts create `_private/` and its subfolders on first run. Before writing, check whether `_private/books.yaml` already exists: if it does, treat it as the source of truth; if `_private/` is missing on a log that has been processed before (photos show books you would expect on disk), stop and ask the user where their data went instead of starting a fresh database.
@@ -70,10 +79,19 @@ All personal data lives under `_private/`, which is gitignored, so the repositor
 1. **Inspect the attached photos:** Use the layout described in **Book Log Profile** and extract every handwritten entry (`Photo #`, `Row #`, `Raw Title`, `Raw Author`, `Cover Pasted?`).
    - An entry has sufficient info to identify a book if it has a title and author.
    - An entry is physically complete (`Cover Pasted? = Yes`) if a printed book cover is already glued into its cover box.
+   - **Read the reader's own habits first.** Handwriting quirks are personal, so they live in `CLAUDE.local.md` (gitignored, loaded automatically), not here. Typical ones to watch for:
+     - Series shorthand or a series name written in place of the title (an abbreviation before the title, or the series name instead of the book's own prefix).
+     - `+` or `&` for "and".
+     - A word written small above the line corrects the word below it; crossed-out text is ignored.
+     - Dates written with the wrong year; take the year from neighbouring rows (dates are not stored).
+     - The same title later in the log is a reread and maps to the existing record.
+     - The author line can be wrong. A title that matches a real book while the author doesn't is a **Needs review** row, never something to "fix" by switching to a different book by the written author.
+   - When you learn a new quirk from the user, add it to `CLAUDE.local.md`, never to this file.
 2. **Check disk first (via script):** Run `scripts/find_books.py` (if `books.yaml` exists and is non-empty) to check whether extracted entries already exist in `books.yaml`. Never read the entire `books.yaml` file into context directly. If a book already exists on disk, reuse its canonical record without querying external APIs.
 3. **Verify new entries via read-only lookup:** For entries not yet on disk, run read-only lookups (Google Books API, Open Library API, or web search) to resolve the book and gather canonical metadata (`title`, `author`, `year_released`, `isbn`, `pages`, `description`, and high-res cover image URL).
    - **Confirmed match:** Raw title and author unambiguously resolve to a single published work—even with spelling errors, missing subtitles, or author initials. Adopt the canonical title and author going forward.
-   - **Needs review:** No confident match exists, multiple plausible books fit the handwriting, title or author is missing/unreadable, or `Cover Pasted?` is unclear.
+   - **Needs review:** No confident match exists, multiple plausible books fit the handwriting, title or author is missing/unreadable, the written title and author point at different books, or `Cover Pasted?` is unclear. A "best guess" you had to reason your way to is still **Needs review**: never add it to `books.yaml` on your own.
+   - **The user's answer beats any lookup.** When the user (or a note relaying the user's words) has already identified an entry, use exactly that book. If a lookup contradicts it, for example the stated book exists but by a different author than the log says, flag the conflict in the gate table and ask; never replace the user's answer with your own choice.
 4. **Conditional Gate:**
    - **If ANY entry is `NEEDS REVIEW`:** Output a Markdown table of only the flagged rows (`Photo # | Row # | Raw Title | Raw Author | Cover Pasted? | Best Guess & Question`), then **STOP**. Do not archive photos, download images, modify `books.yaml`, or generate PDFs until the user resolves the flagged entries.
    - **If ALL entries are confirmed:** Proceed directly to Phase 2 without pausing. Include a compact `Raw → Canonical` list in your final summary for any spelling or title corrections applied.
@@ -84,22 +102,19 @@ Do not perform photo archival, filename sanitization, sorting, YAML edits, or PD
 
 - **First run (when `scripts/` does not exist):** Write `archive_photos.py`, `find_books.py`, `add_book.py`, `build_catalog.py`, and `build_cutouts.py`, plus unit tests covering filename sanitization, publisher-alphabetical sorting, atomic YAML persistence, photo deduplication/date-stamping, and cutout bounding-box/spacing math. Render sample pages of both generated PDFs to PNG via `pdftoppm` and visually inspect them to verify layout, alignment, and page breaks before finishing.
 - **Subsequent runs:** Execute the existing scripts. Do not rewrite or alter them unless fixing a verified bug or implementing an explicit change requested by the user.
-- Archive the processed batch photos via `scripts/archive_photos.py`, then add/update books via `scripts/add_book.py`, rebuild `book-log.pdf` via `scripts/build_catalog.py`, and generate any needed cutout sheet via `scripts/build_cutouts.py`.
+- Archive the processed batch photos via `scripts/archive_photos.py`, then add/update books via `scripts/add_book.py`, check new covers with `scripts/cover_sheet.py` (open `_private/previews/cover-sheet.jpg` and look at every new cover), rebuild `book-log.pdf` via `scripts/build_catalog.py`, and generate any needed cutout sheet via `scripts/build_cutouts.py`.
+- **Corrections go through the scripts too:**
+  - A better cover for a stored book: `add_book.py --replace-cover ID FILE` (same size and mockup rules as a new cover).
+  - A record the user confirms was misidentified: `add_book.py --remove ID`, then add the right book normally. This is the only time a record may be deleted.
+  - If a corrected book was already on a cutout sheet that has **not been printed yet**, rebuild that sheet with `build_cutouts.py --redo to-print/covers-YYYY-MM-DD.pdf`. Once the user may have printed a sheet, leave it alone and let the next run's sheet carry any fix.
+  - `build_cutouts.py --dry-run` only reports the layout and writes nothing.
+- **Git:** commit only code and docs. Never commit anything in `_private/`, never amend a commit, and never force-push. Commit or push only when the user asks.
 
-## Phase 3: Deliver Preview & Print on Confirmation
+## Phase 3: Hand Off the PDFs (the user prints)
 
-- If a new `to-print/covers-YYYY-MM-DD.pdf` was generated, send it to the user via `SendUserFile` (when available over Remote Control) so they can visually inspect the covers on their phone.
-- **Do not print automatically.** Ask the user if they want you to send the sheet to the printer named in **Book Log Profile**.
-- Once the user replies to print (e.g., `"print it"`), run:
-  ```bash
-  lp -d "<PRINTER_QUEUE_NAME>" \
-     -o media=Letter \
-     -o print-scaling=none \
-     -o sides=one-sided \
-     _private/to-print/covers-YYYY-MM-DD.pdf
-  ```
-
----
+- **Never print, and never offer to.** The user prints the files themselves.
+- At the end of every run, give the user the rebuilt `book-log.pdf` and every `to-print/covers-YYYY-MM-DD*.pdf` generated in this run, each with its full path on the Mac.
+- Send them with `SendUserFile` when it is available (e.g. over Remote Control). Files over the 20 MB phone limit cannot be sent, so run `scripts/make_preview.py` on them and send the small `_private/previews/*-preview.pdf` copies instead, saying they are view-only and that printing must use the full file on the Mac.
 
 # Rules
 
@@ -140,6 +155,12 @@ Maintain a single top-level YAML list. Store the clean 2–4 sentence official s
 
 ## 3. Cover Art Rules (`cover-art/`)
 - Download the official, authorized color cover image from the publisher/author. Prefer the original US hardcover or primary edition; avoid movie/TV tie-in covers unless no other edition exists.
+- **Flat front covers first; mockups only as a last resort.** Use a flat, front-on image of the front cover. A 3D product mockup (an angled book showing its spine or page edges, usually on a white background) is allowed only when no flat cover of at least the minimum resolution can be found. Never use photos of physical books or covers with retailer badges or banners.
+  - `add_book.py` refuses any cover that looks like a mockup. When it does, search in this order before giving up: the publisher's US ebook (Apple Books), other editions' ISBNs (standard rather than deluxe editions, then other countries' English editions) via Open Library and retailer images, then the author's or publisher's website.
+  - Only if all of those fail, re-run that book with `"allow_mockup": true` in its input, and list it under a **Mockup covers used** heading in the final summary so the user can supply a better image.
+  - The check is a heuristic, so also look over a contact sheet of new covers before building the PDFs. Replace any mockup it missed the same way.
+- **Audio-only and Kindle-only books** (Audible Originals, Spotify/Audible exclusives, Kindle Unlimited titles with no print run) have no print cover. For those, the audiobook artwork or the Amazon listing cover is the official cover, even when square or carrying an "Only from Audible" style badge; still prefer a portrait ebook cover when one exists.
+- **Never settle for "no cover found" after one source.** When the first lookup gives no usable cover (or only a mockup, square audiobook art, or a wrong book), run `scripts/find_cover.py "Title" "Author"` with every `--isbn` you know, and `--url` for the author's book page (author sites usually link the Amazon listings, whose ASINs the script follows). It checks Apple Books, every English Open Library edition, Amazon by ASIN/ISBN-10 and the pages you pass, and prints flat candidates best first (portrait print covers ahead of square audiobook art) with mockups listed separately. Look at the top candidate before using it. Indie and Kindle Unlimited titles are often missing from Apple Books and Open Library but present on Amazon and the author's site. A book may be stored without a cover only after `find_cover.py` with those inputs returns nothing; say so in the final summary.
 - Target high resolution (`>= 1500px` tall preferred; minimum `500px` tall so a print at the cover-box height stays sharp at 300 DPI). Never upscale low-res thumbnails to fake resolution.
 - **Filename & `id` format:**
   `<author_last>_<author_first>-<book_title>.<ext>` (with `id` omitting `.<ext>`)
@@ -158,10 +179,11 @@ Rebuild `book-log.pdf` from **ALL** entries in `books.yaml` whenever a run adds 
 - **Sorting:** Follow the publisher-alphabetical order in `books.yaml` (case-insensitive, ignoring leading `A `, `An `, `The `).
 - **Rendering engine:** HTML + CSS via **WeasyPrint** (or **Typst**). Do not use raw ReportLab or LaTeX for the catalog layout.
 - **Page setup:** US Letter (`8.5in × 11in`), portrait, `0.75in` margins on all sides. Clean sans-serif stack (Inter, Helvetica Neue, or system sans-serif), `10pt` body, `1.45` line-height, `#1a1a1a` text. Centered page numbers in the bottom margin (`8.5pt`, `#666666`).
+- **Four books per page:** every page holds exactly four cards (the last page may hold fewer), with a page break after every fourth card.
 - **Entry layout (two-column card):**
   - Strict page-break protection (`break-inside: avoid;` or `block(breakable: false)`) so an entry never splits across pages.
-  - Flexbox/grid row, `0.25in` column gap, `0.25in` vertical padding, `1px solid #e0e0e0` bottom border (omitted on final entry).
-  - **Left column (cover):** Fixed `1.3in` width (`flex-shrink: 0`), auto height preserving aspect ratio (`max-height: 2.1in`), `3px` border-radius, `1px solid #d0d0d0` border. Fallback if missing: `1.3in × 1.95in` `#f0f0f0` box with centered title.
+  - Flexbox/grid row, fixed `2.2in` card height, `0.25in` column gap, `0.12in` vertical padding, `1px solid #e0e0e0` bottom border (omitted on the last card of each page).
+  - **Left column (cover):** Fixed `1.3in` width (`flex-shrink: 0`), auto height preserving aspect ratio (`max-height: 1.95in`), `3px` border-radius, `1px solid #d0d0d0` border. Fallback if missing: `1.3in × 1.95in` `#f0f0f0` box with centered title.
   - **Right column (stacked top to bottom):**
     1. **Title:** `15pt`, bold (`700`), `#000000`, `2pt` bottom margin.
     2. **Author:** `11pt`, medium (`500`), `#4a4a4a`, `8pt` bottom margin.
@@ -191,10 +213,11 @@ A run is complete only when all of the following hold:
 - Every processed input photo from the current batch has been archived into `log-photos/` with a `YYYY-MM-DD_NN.<ext>` filename (or skipped cleanly if an identical hash already exists).
 - Every confirmed book from the attached photos (plus all previously stored books) has its high-resolution cover image in `cover-art/` and a valid entry in the sorted `books.yaml` containing `id`, `title`, `author`, `year_released`, `isbn`, `pages`, `cover_image`, `cover_status`, and `description`.
 - `book-log.pdf` is rebuilt from all entries in `books.yaml`, sorted alphabetically by title, with zero split cards or broken images.
-- If any books had `cover_status: needed`, a dated cutout PDF exists in `to-print/` with exact cover-box (`W × H`) scaling, at least `1.0 cm` spacing, aligned columns, and a `5.0 cm` calibration bar—those entries have been updated to `cover_status: printed`, and the PDF has been sent to the user via `SendUserFile` (when available).
+- If any books had `cover_status: needed`, a dated cutout PDF exists in `to-print/` with exact cover-box (`W × H`) scaling, at least `1.0 cm` spacing, aligned columns, and a `5.0 cm` calibration bar, and those entries have been updated to `cover_status: printed`.
+- `book-log.pdf` and this run's cutout PDFs have been handed to the user as described in Phase 3 (or their previews, when over the phone limit).
 - On the first run (or after script edits), unit tests pass and rendered PNG previews of both PDFs have been visually verified.
 - Your final message includes:
   1. Count of photos archived, and count of books added, already known, and status-upgraded.
   2. Any `Raw → Canonical` spelling/title corrections applied automatically.
-  3. Confirmation of the cutout PDF sent (or its local path), a prompt asking whether to print it from the Mac via `lp` at 1:1 scale (or print manually in macOS Preview at **Scale: 100%**), and a reminder to check the `5.0 cm` calibration bar with a ruler on the first print.
+  3. The files handed off: `book-log.pdf` and each new cutout PDF, with their paths on the Mac. Remind the user to print cutout sheets at **100% scale** (no "fit to page") and to check the `5.0 cm` calibration bar with a ruler on the first print.
   
