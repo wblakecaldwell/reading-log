@@ -154,3 +154,73 @@ def test_next_path_never_overwrites(tmp_path):
     (tmp_path / "covers-2026-11-22.pdf").write_text("x")
     (tmp_path / "covers-2026-11-22-2.pdf").write_text("x")
     assert bc.next_path("2026-11-22", tmp_path).name == "covers-2026-11-22-3.pdf"
+
+
+# --------------------------------------------------------- mockup check ---
+def test_mockup_detection():
+    from PIL import Image, ImageDraw
+    flat = Image.new("RGB", (400, 600), (30, 60, 120))           # artwork to every edge
+    pale = Image.new("RGB", (400, 600), (250, 250, 250))         # pale cover, dark art inside
+    ImageDraw.Draw(pale).rectangle((0, 300, 400, 600), fill=(120, 20, 20))
+    mock = Image.new("RGB", (472, 600), (255, 255, 255))         # angled book on white page
+    ImageDraw.Draw(mock).polygon([(60, 40), (420, 20), (420, 580), (60, 560)], fill=(90, 20, 40))
+    assert not add_book.looks_like_mockup(flat)
+    assert not add_book.looks_like_mockup(pale)
+    assert add_book.looks_like_mockup(mock)
+
+
+def test_mockup_refused_unless_allowed(tmp_path, monkeypatch):
+    from PIL import Image, ImageDraw
+    mock = Image.new("RGB", (472, 600), (255, 255, 255))
+    ImageDraw.Draw(mock).polygon([(60, 40), (420, 20), (420, 580), (60, 560)], fill=(90, 20, 40))
+    src = tmp_path / "mock.png"
+    mock.save(src)
+    monkeypatch.setattr(add_book, "COVER_DIR", tmp_path / "covers")
+    rec = {"title": "T", "author": "A B", "cover_file": str(src)}
+    with pytest.raises(ValueError, match="mockup"):
+        add_book.fetch_cover(rec, "b_a-t")
+    assert add_book.fetch_cover({**rec, "allow_mockup": True}, "b_a-t") == "cover-art/b_a-t.png"
+
+
+# ----------------------------------------------------------- find_cover ---
+def test_find_cover_helpers():
+    import find_cover
+    assert find_cover.isbn13_to_10("9780306406157") == "0306406152"
+    assert find_cover.isbn13_to_10("9798000000000") is None          # 979 has no ISBN-10
+    html = '"hiRes":"https://m.media-amazon.com/images/I/AbCd123._SL1500_.jpg" data-old-hires="https://m.media-amazon.com/images/I/AbCd123._SL1500_.jpg"'
+    assert find_cover.amazon_hires(html) == ["https://m.media-amazon.com/images/I/AbCd123.jpg"]
+    assert find_cover.apple_art_full("https://x/a/9781.jpg/100x100bb.jpg") == "https://x/a/9781.jpg/3000x3000bb.jpg"
+
+
+# ----------------------------------------------------------- corrections ---
+def _flat_cover(path, size=(400, 600)):
+    from PIL import Image
+    Image.new("RGB", size, (30, 60, 120)).save(path)
+    return path
+
+
+def test_replace_cover_and_remove_book(tmp_path, monkeypatch):
+    monkeypatch.setattr(add_book, "COVER_DIR", tmp_path / "covers")
+    db = tmp_path / "books.yaml"
+    add_book.add_books([_rec("Emma", "Jane Austen"), _rec("Dracula", "Bram Stoker")], db, download=None)
+    new = _flat_cover(tmp_path / "new.png")
+    assert add_book.replace_cover("austen_jane-emma", str(new), path=db) == "cover-art/austen_jane-emma.png"
+    assert (tmp_path / "covers" / "austen_jane-emma.png").exists()
+    with pytest.raises(ValueError):           # still enforces the minimum height
+        add_book.replace_cover("austen_jane-emma", str(_flat_cover(tmp_path / "s.png", (100, 150))), path=db)
+    add_book.remove_book("austen_jane-emma", path=db)
+    ids = [b["id"] for b in yaml.safe_load(db.read_text())]
+    assert ids == ["stoker_bram-dracula"]
+    assert not list((tmp_path / "covers").glob("austen_jane-emma.*"))
+    with pytest.raises(KeyError):
+        add_book.remove_book("nope", path=db)
+
+
+# ----------------------------------------------------------- cover_sheet ---
+def test_cover_sheet_grid(tmp_path):
+    import cover_sheet
+    files = [_flat_cover(tmp_path / f"b{i}.png") for i in range(3)]
+    out = cover_sheet.sheet(files, tmp_path / "sheet.jpg")
+    from PIL import Image
+    with Image.open(out) as im:
+        assert im.size == (cover_sheet.COLS * cover_sheet.TW, cover_sheet.TH + cover_sheet.LABEL)
