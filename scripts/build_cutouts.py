@@ -8,14 +8,23 @@ stacked in 4.31 cm columns, so every column's left/right edges line up for
 straight paper-cutter cuts. >= 1.0 cm between covers, >= 1.25 cm outer margin,
 and a labelled 5.0 cm calibration bar in each page's bottom margin.
 
-After writing the PDF, the included books flip needed -> printed.
+After writing the PDF, the included books flip needed -> printed, and a
+manifest (covers-YYYY-MM-DD.json next to the PDF) records which books it holds.
 
-Usage: build_cutouts.py [--date YYYY-MM-DD] [--dry-run]
+Usage:
+    build_cutouts.py [--date YYYY-MM-DD]       # build a sheet for every `needed` book
+    build_cutouts.py --dry-run                  # report the layout; writes nothing
+    build_cutouts.py --redo to-print/covers-YYYY-MM-DD.pdf
+        # The sheet has NOT been printed yet and needs rebuilding (e.g. a cover
+        # was replaced or a book corrected): flips that sheet's books back to
+        # needed, removes the sheet and its manifest, then builds a fresh sheet
+        # under the same name. Never use it on a sheet that has been printed.
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -127,13 +136,36 @@ def next_path(date: str, outdir: Path) -> Path:
     return p
 
 
+def undo_sheet(books: list[dict], sheet: Path) -> tuple[list[dict], Path]:
+    """Flip an unprinted sheet's books printed -> needed and delete the sheet."""
+    sheet = DATA / "to-print" / sheet.name        # sheets only ever live in to-print/
+    manifest = sheet.with_suffix(".json")
+    if not manifest.exists():
+        raise SystemExit(f"no manifest {manifest.name}; cannot tell which books {sheet.name} holds")
+    ids = set(json.loads(manifest.read_text()))
+    n = 0
+    for b in books:
+        if b["id"] in ids and b.get("cover_status") == "printed":
+            b["cover_status"] = "needed"
+            n += 1
+    save_books(books, BOOKS_YAML)
+    sheet.unlink(missing_ok=True)
+    manifest.unlink()
+    print(f"redo: {n} books from {sheet.name} set back to needed")
+    return load_books(BOOKS_YAML), sheet
+
+
 def main() -> int:
     from PIL import Image
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=dt.date.today().isoformat())
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--redo", type=Path, help="unprinted sheet to rebuild")
     a = ap.parse_args()
     books = load_books(BOOKS_YAML)
+    redo_path = None
+    if a.redo:
+        books, redo_path = undo_sheet(books, a.redo)
     needed = [b for b in sorted(books, key=sort_key)
               if b.get("cover_status") == "needed" and b.get("cover_image")
               and (DATA / b["cover_image"]).is_file()]
@@ -147,16 +179,20 @@ def main() -> int:
     placed = layout(items)
     outdir = DATA / "to-print"
     outdir.mkdir(parents=True, exist_ok=True)
-    out = next_path(a.date, outdir)
+    pages = max(p.page for p in placed) + 1
+    if a.dry_run:
+        print(f"dry run: {len(placed)} covers would fit on {pages} page(s); nothing written")
+        return 0
+    out = redo_path or next_path(a.date, outdir)
     draw(placed, out)
-    print(f"{out.relative_to(DATA.parent)}: {len(placed)} covers on {max(p.page for p in placed) + 1} page(s)")
-    if not a.dry_run:
-        done = {p.book_id for p in placed}
-        for b in books:
-            if b["id"] in done and b.get("cover_status") == "needed":
-                b["cover_status"] = "printed"
-        save_books(books, BOOKS_YAML)
-        print(f"{len(done)} books flipped needed -> printed")
+    out.with_suffix(".json").write_text(json.dumps(sorted(p.book_id for p in placed), indent=1))
+    print(f"{out.relative_to(DATA.parent)}: {len(placed)} covers on {pages} page(s)")
+    done = {p.book_id for p in placed}
+    for b in books:
+        if b["id"] in done and b.get("cover_status") == "needed":
+            b["cover_status"] = "printed"
+    save_books(books, BOOKS_YAML)
+    print(f"{len(done)} books flipped needed -> printed")
     return 0
 
 

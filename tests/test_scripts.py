@@ -192,6 +192,19 @@ def test_find_cover_helpers():
     assert find_cover.apple_art_full("https://x/a/9781.jpg/100x100bb.jpg") == "https://x/a/9781.jpg/3000x3000bb.jpg"
 
 
+# ---------------------------------------------------------- make_preview ---
+def test_make_preview_skips_small_and_shrinks_large(tmp_path):
+    import make_preview
+    from reportlab.pdfgen import canvas
+    pdf = tmp_path / "big.pdf"
+    c = canvas.Canvas(str(pdf))
+    c.drawString(100, 700, "hello")
+    c.save()
+    assert make_preview.preview(pdf, max_mb=10, outdir=tmp_path / "p") is None
+    out = make_preview.preview(pdf, max_mb=pdf.stat().st_size / 2**20 / 2, outdir=tmp_path / "p")
+    assert out == tmp_path / "p" / "big-preview.pdf" and out.exists()
+
+
 # ----------------------------------------------------------- corrections ---
 def _flat_cover(path, size=(400, 600)):
     from PIL import Image
@@ -214,6 +227,24 @@ def test_replace_cover_and_remove_book(tmp_path, monkeypatch):
     assert not list((tmp_path / "covers").glob("austen_jane-emma.*"))
     with pytest.raises(KeyError):
         add_book.remove_book("nope", path=db)
+
+
+def test_cutouts_redo_flips_only_that_sheets_books(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(bc, "DATA", tmp_path)
+    monkeypatch.setattr(bc, "BOOKS_YAML", tmp_path / "books.yaml")
+    (tmp_path / "to-print").mkdir()
+    books = [{"id": "a", "title": "A", "author": "X", "cover_status": "printed"},
+             {"id": "b", "title": "B", "author": "X", "cover_status": "printed"},
+             {"id": "c", "title": "C", "author": "X", "cover_status": "pasted"}]
+    add_book.save_books(books, tmp_path / "books.yaml")
+    sheet = tmp_path / "to-print" / "covers-2026-01-01.pdf"
+    sheet.write_bytes(b"%PDF")
+    sheet.with_suffix(".json").write_text(json.dumps(["a", "c"]))
+    books, path = bc.undo_sheet(add_book.load_books(tmp_path / "books.yaml"), Path("covers-2026-01-01.pdf"))
+    status = {b["id"]: b["cover_status"] for b in books}
+    assert status == {"a": "needed", "b": "printed", "c": "pasted"}   # pasted never downgraded
+    assert path == sheet and not sheet.exists() and not sheet.with_suffix(".json").exists()
 
 
 # ----------------------------------------------------------- cover_sheet ---
