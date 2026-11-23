@@ -13,7 +13,7 @@ Each run processes a partial batch of new or overlapping log photos and maintain
 
 # Privacy (read first)
 
-This file and everything else outside `_private/` is committed and public. Never put anything from the reader's actual log, or anything derived from `_private/` data, here or in code, tests, commit messages or docs: no book titles or authors from their list, no names, no handwriting samples, no dates, no paths or device names, and no numbers, IDs or URLs looked up for their books (ISBNs, ASINs, page counts, listening lengths, cover-image IDs, store links). Tests and examples use made-up values only (e.g. *Emma*, *Dracula*, ISBN `9780000000002`). Reader-specific notes go in `CLAUDE.local.md`; data goes in `_private/`. The `.githooks/` guard blocks commits that break this; never bypass it with `--no-verify`.
+This file and everything else outside `_private/` is committed and public. Never put anything from the reader's actual log, or anything derived from `_private/` data, here or in code, tests, commit messages or docs: no book titles or authors from their list, no names, no handwriting samples, no dates, no paths or device names, and no numbers, IDs or URLs looked up for their books (ISBNs, ASINs, page counts, listening lengths, cover-image IDs, store links). Tests and examples use made-up values only (e.g. *Emma*, *Dracula*, ISBN `9780000000002`, `6 hr 30 min`). Reader-specific notes go in `CLAUDE.local.md`; data goes in `_private/`. The `.githooks/` guard blocks commits that break this; never bypass it with `--no-verify`.
 
 ---
 
@@ -53,6 +53,7 @@ All personal data lives under `_private/`, which is gitignored, so the repositor
 │   ├── find_books.py              # Fuzzy lookup against _private/books.yaml
 │   ├── find_cover.py              # Searches many sources for flat, high-res cover candidates
 │   ├── cover_sheet.py             # Contact sheet of covers for a visual check
+│   ├── find_pages.py              # Page counts (or listening length for audio-only books)
 │   ├── add_book.py                # Sole writer to _private/books.yaml & _private/cover-art/
 │   ├── build_catalog.py           # Compiles _private/book-log.pdf from books.yaml
 │   ├── build_cutouts.py           # Compiles _private/to-print/covers-YYYY-MM-DD.pdf
@@ -88,7 +89,7 @@ All personal data lives under `_private/`, which is gitignored, so the repositor
      - The author line can be wrong. A title that matches a real book while the author doesn't is a **Needs review** row, never something to "fix" by switching to a different book by the written author.
    - When you learn a new quirk from the user, add it to `CLAUDE.local.md`, never to this file.
 2. **Check disk first (via script):** Run `scripts/find_books.py` (if `books.yaml` exists and is non-empty) to check whether extracted entries already exist in `books.yaml`. Never read the entire `books.yaml` file into context directly. If a book already exists on disk, reuse its canonical record without querying external APIs.
-3. **Verify new entries via read-only lookup:** For entries not yet on disk, run read-only lookups (Google Books API, Open Library API, or web search) to resolve the book and gather canonical metadata (`title`, `author`, `year_released`, `isbn`, `pages`, `description`, and high-res cover image URL).
+3. **Verify new entries via read-only lookup:** For entries not yet on disk, run read-only lookups (Open Library, Apple Books, `scripts/find_pages.py` for page counts, or web search) to resolve the book and gather canonical metadata (`title`, `author`, `year_released`, `isbn`, `pages`, `description`, and high-res cover image URL).
    - **Confirmed match:** Raw title and author unambiguously resolve to a single published work—even with spelling errors, missing subtitles, or author initials. Adopt the canonical title and author going forward.
    - **Needs review:** No confident match exists, multiple plausible books fit the handwriting, title or author is missing/unreadable, the written title and author point at different books, or `Cover Pasted?` is unclear. A "best guess" you had to reason your way to is still **Needs review**: never add it to `books.yaml` on your own.
    - **The user's answer beats any lookup.** When the user (or a note relaying the user's words) has already identified an entry, use exactly that book. If a lookup contradicts it, for example the stated book exists but by a different author than the log says, flag the conflict in the gate table and ask; never replace the user's answer with your own choice.
@@ -153,6 +154,12 @@ Maintain a single top-level YAML list. Store the clean 2–4 sentence official s
     nature of his assignment or how to complete it.
 ```
 
+**Page counts are required.** Every book needs `pages`, the print length of a print edition (any English edition will do). The only exception is an audio-only book with no print edition, which instead gets `audio_length` (e.g. `"6 hr 30 min"`); omit that field on all other books.
+- Get them with `scripts/find_pages.py "Title" "Author" --isbn ISBN` (Open Library, then Apple Books). `find_pages.py --missing` checks every stored book and prints JSON for `add_book.py --fill`, which only fills empty fields.
+- Apple Books page counts can be badly low; confirm any under 200 (the script flags them) with a second source.
+- When the scripts find nothing, search the web for the publisher's or a retailer's listing of a print edition before falling back to `audio_length`. Google Books is not a dependable source: its keyless quota is usually exhausted.
+- A page count the reader wrote in the log (the `Length` field) is a valid source for that book.
+
 ## 3. Cover Art Rules (`cover-art/`)
 - Download the official, authorized color cover image from the publisher/author. Prefer the original US hardcover or primary edition; avoid movie/TV tie-in covers unless no other edition exists.
 - **Flat front covers first; mockups only as a last resort.** Use a flat, front-on image of the front cover. A 3D product mockup (an angled book showing its spine or page edges, usually on a white background) is allowed only when no flat cover of at least the minimum resolution can be found. Never use photos of physical books or covers with retailer badges or banners.
@@ -189,7 +196,7 @@ Rebuild `book-log.pdf` from **ALL** entries in `books.yaml` whenever a run adds 
     2. **Author:** `11pt`, medium (`500`), `#4a4a4a`, `8pt` bottom margin.
     3. **Short description:** `10pt`, regular (`400`), `#222222`, `10pt` bottom margin.
     4. **Metadata footer:** Single line, `8.5pt`, `#666666`, middot-separated:
-       `{Pages} pages · ISBN {ISBN-13} · Published {Year}`
+       `{Pages} pages · ISBN {ISBN-13} · Published {Year}` (for an audio-only book with no page count: `Audiobook, {audio_length}` in place of the pages)
        *(Omit missing fields cleanly; never print "N/A" or trailing middots.)*
 
 ## 6. Printable Cover Cutout PDF Specification (`to-print/covers-YYYY-MM-DD.pdf`)
@@ -211,7 +218,7 @@ Generate a cutout PDF **only** if one or more books currently have `cover_status
 
 A run is complete only when all of the following hold:
 - Every processed input photo from the current batch has been archived into `log-photos/` with a `YYYY-MM-DD_NN.<ext>` filename (or skipped cleanly if an identical hash already exists).
-- Every confirmed book from the attached photos (plus all previously stored books) has its high-resolution cover image in `cover-art/` and a valid entry in the sorted `books.yaml` containing `id`, `title`, `author`, `year_released`, `isbn`, `pages`, `cover_image`, `cover_status`, and `description`.
+- Every confirmed book from the attached photos (plus all previously stored books) has its high-resolution cover image in `cover-art/` and a valid entry in the sorted `books.yaml` containing `id`, `title`, `author`, `year_released`, `isbn`, `pages` (or `audio_length` for an audio-only book), `cover_image`, `cover_status`, and `description`. No book is left without a length.
 - `book-log.pdf` is rebuilt from all entries in `books.yaml`, sorted alphabetically by title, with zero split cards or broken images.
 - If any books had `cover_status: needed`, a dated cutout PDF exists in `to-print/` with exact cover-box (`W × H`) scaling, at least `1.0 cm` spacing, aligned columns, and a `5.0 cm` calibration bar, and those entries have been updated to `cover_status: printed`.
 - `book-log.pdf` and this run's cutout PDFs have been handed to the user as described in Phase 3 (or their previews, when over the phone limit).

@@ -4,7 +4,7 @@ Turn photos of a handwritten reading journal into a tidy digital catalog, plus p
 
 You keep a physical reading log. You snap photos of its pages. [Claude Code](https://claude.com/claude-code) reads the handwriting, looks up each book, and this repo's scripts do the rest:
 
-- **`books.yaml`**: one sorted database of every book (title, author, year, ISBN, pages, short description, cover status)
+- **`books.yaml`**: one sorted database of every book (title, author, year, ISBN, pages or listening length, short description, cover status)
 - **`cover-art/`**: a high-resolution cover image for each book
 - **`book-log.pdf`**: an alphabetical catalog of everything you've read, one card per book
 - **`to-print/covers-YYYY-MM-DD.pdf`**: a 1:1-scale sheet of the covers you still need to paste in, packed into straight columns so a paper cutter can trim them in a few cuts, with a 5 cm calibration bar
@@ -74,6 +74,7 @@ Print the cutout sheet at **100% scale** (no "fit to page"), then measure the 5 
 | `scripts/add_book.py` | The only writer to `books.yaml` and `cover-art/`: de-duplicates, downloads covers, sorts, and writes atomically; also replaces a cover or removes a misidentified book |
 | `scripts/build_catalog.py` | Builds `book-log.pdf` with WeasyPrint, four books per page |
 | `scripts/build_cutouts.py` | Builds the 1:1 cover cutout sheet with ReportLab and marks those covers as printed; `--redo` rebuilds a sheet that has not been printed yet |
+| `scripts/find_pages.py` | Looks up page counts, or listening length for audio-only books, and fills any that are missing |
 | `scripts/cover_sheet.py` | Builds a labelled contact sheet of covers so new ones can be checked at a glance |
 | `scripts/make_preview.py` | Makes small view-only copies of large PDFs so they can be sent to a phone |
 

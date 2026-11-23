@@ -56,7 +56,7 @@ def test_atomic_sorted_write_and_roundtrip(tmp_path):
     data = yaml.safe_load(db.read_text())
     assert [b["title"] for b in data] == ["The Alpha", "Zeta"]
     assert data[1]["isbn"] == "9780000000001" and isinstance(data[1]["isbn"], str)
-    assert list(data[0]) == add_book.FIELDS
+    assert list(data[0]) == [f for f in add_book.FIELDS if f != "audio_length"]   # optional field omitted when empty
     assert not (tmp_path / "books.yaml.tmp").exists()
     assert "description: >" in db.read_text()
 
@@ -255,3 +255,36 @@ def test_cover_sheet_grid(tmp_path):
     from PIL import Image
     with Image.open(out) as im:
         assert im.size == (cover_sheet.COLS * cover_sheet.TW, cover_sheet.TH + cover_sheet.LABEL)
+
+
+# ----------------------------------------------------------- page counts ---
+def test_fill_missing_never_overwrites(tmp_path):
+    db = tmp_path / "books.yaml"
+    add_book.add_books([{**_rec("Emma", "Jane Austen"), "pages": 300},
+                        {**_rec("Dracula", "Bram Stoker"), "pages": None}], db, download=None)
+    s = add_book.fill_missing([{"id": "austen_jane-emma", "pages": 999},
+                               {"id": "stoker_bram-dracula", "pages": 418, "cover_status": "pasted"},
+                               {"id": "nope", "pages": 1}], db)
+    by_id = {b["id"]: b for b in add_book.load_books(db)}
+    assert by_id["austen_jane-emma"]["pages"] == 300           # kept
+    assert by_id["stoker_bram-dracula"]["pages"] == 418         # filled
+    assert by_id["stoker_bram-dracula"]["cover_status"] != "pasted"   # not a fillable field
+    assert s["unknown"] == ["nope"]
+    assert "audio_length" not in db.read_text()                # optional field omitted when empty
+
+
+def test_meta_line_audio_only():
+    assert build_catalog.meta_line({"audio_length": "6 hr 30 min", "year_released": 2001}) == \
+        "Audiobook, 6 hr 30 min · Published 2001"
+    assert build_catalog.meta_line({"pages": 300, "audio_length": "9 hr"}) == "300 pages"
+
+
+def test_find_pages_parsers():
+    import find_pages
+    assert find_pages.iso_duration("PT6H30M15S") == "6 hr 30 min"
+    assert find_pages.iso_duration("PT45M") == "45 min"
+    assert find_pages.iso_duration("bogus") is None
+    en = 'x\\"primaryLocale\\":\\"en\\" "numberOfPages":312'
+    it = 'x\\"primaryLocale\\":\\"it\\" "numberOfPages":312'
+    assert find_pages.page_count(en) == 312
+    assert find_pages.page_count(it) is None                   # foreign-language edition

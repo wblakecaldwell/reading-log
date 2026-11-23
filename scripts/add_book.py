@@ -8,6 +8,10 @@ Usage:
                                    # swap a stored cover for a better one
     add_book.py --remove ID        # delete a record (and its cover) that the
                                    # user confirmed was misidentified
+    add_book.py --fill FILE.json   # [{"id": ..., "pages": ...}, ...]: set only
+                                   # metadata fields that are currently empty
+
+audio_length (e.g. "6 hr 30 min") is for audio-only books with no page count.
 
 Each input object: title, author, year_released, isbn, pages, description,
 cover_url (or cover_file), pasted (bool), and optionally allow_mockup (bool).
@@ -34,8 +38,9 @@ DATA = ROOT / "_private"          # all personal reading-log data (gitignored)
 BOOKS_YAML = DATA / "books.yaml"
 COVER_DIR = DATA / "cover-art"
 STATUS_RANK = {"needed": 0, "printed": 1, "pasted": 2}
-FIELDS = ["id", "title", "author", "year_released", "isbn", "pages",
+FIELDS = ["id", "title", "author", "year_released", "isbn", "pages", "audio_length",
           "cover_image", "cover_status", "description"]
+FILLABLE = {"year_released", "isbn", "pages", "audio_length", "description"}
 MIN_COVER_HEIGHT = 500
 
 
@@ -104,6 +109,8 @@ def save_books(books: list[dict], path: Path = BOOKS_YAML) -> None:
         rec = {k: b.get(k) for k in FIELDS}
         if rec["isbn"] is not None:
             rec["isbn"] = str(rec["isbn"])
+        if not rec.get("audio_length"):
+            rec.pop("audio_length")       # optional: only for audio-only books
         if rec["description"]:
             rec["description"] = _Folded(" ".join(str(rec["description"]).split()))
         out.append(rec)
@@ -232,6 +239,26 @@ def replace_cover(book_id: str, cover_file: str, allow_mockup: bool = False,
     return book["cover_image"]
 
 
+def fill_missing(items: list[dict], path: Path = BOOKS_YAML) -> dict:
+    """Fill empty metadata fields (pages, isbn, ...) on existing books.
+    Never overwrites a value that is already set."""
+    books = {b["id"]: b for b in load_books(path)}
+    stats = {"filled": [], "skipped": [], "unknown": []}
+    for item in items:
+        b = books.get(item.get("id"))
+        if b is None:
+            stats["unknown"].append(item.get("id"))
+            continue
+        changed = False
+        for k, v in item.items():
+            if k in FILLABLE and v not in (None, "") and b.get(k) in (None, ""):
+                b[k] = v
+                changed = True
+        stats["filled" if changed else "skipped"].append(b["id"])
+    save_books(list(books.values()), path)
+    return stats
+
+
 def remove_book(book_id: str, path: Path = BOOKS_YAML) -> dict:
     """Delete a misidentified record and its cover. Only for a book the user
     confirmed is wrong; never because it is missing from a batch of photos."""
@@ -273,6 +300,12 @@ def add_books(items: list[dict], path: Path = BOOKS_YAML, download=fetch_cover) 
 def main(argv: list[str]) -> int:
     if len(argv) >= 4 and argv[1] == "--replace-cover":
         print(replace_cover(argv[2], argv[3], allow_mockup="--allow-mockup" in argv[4:]))
+        return 0
+    if len(argv) == 3 and argv[1] == "--fill":
+        stats = fill_missing(json.loads(Path(argv[2]).read_text(encoding="utf-8")))
+        print(json.dumps({k: len(v) for k, v in stats.items()}))
+        for i in stats["unknown"]:
+            print(f"unknown id: {i}")
         return 0
     if len(argv) == 3 and argv[1] == "--remove":
         b = remove_book(argv[2])

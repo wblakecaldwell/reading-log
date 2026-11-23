@@ -47,6 +47,8 @@ def meta_line(b: dict) -> str:
     parts = []
     if b.get("pages"):
         parts.append(f"{b['pages']} pages")
+    elif b.get("audio_length"):
+        parts.append(f"Audiobook, {b['audio_length']}")
     if b.get("isbn"):
         parts.append(f"ISBN {b['isbn']}")
     if b.get("year_released"):
